@@ -1,0 +1,10 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ebs-sc
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3  # Change this to 'io1', 'io2', etc., if needed
+  fsType: ext4  # Filesystem type
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer

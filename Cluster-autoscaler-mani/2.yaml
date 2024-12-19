@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-test
+  labels:
+    app: load-test
+spec:
+  replicas: 10  # Change this number to increase the load
+  selector:
+    matchLabels:
+      app: load-test
+  template:
+    metadata:
+      labels:
+        app: load-test
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest  # Using the nginx image
+        resources:
+          requests:
+            memory: "500Mi"  # Requesting memory
+            cpu: "500m"      # Requesting CPU
+          limits:
+            memory: "1Gi"    # Setting memory limits
+            cpu: "1"         # Setting CPU limits
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: load-test-service
+spec:
+  selector:
+    app: load-test
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+  type: ClusterIP  # Internal service type
+

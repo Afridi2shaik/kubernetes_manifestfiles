@@ -1,0 +1,152 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluentd-config
+  namespace: kube-system
+  labels:
+    k8s-app: fluentd-cloudwatch
+data:
+  fluent.conf: |
+    @include containers.conf
+  
+  containers.conf: |
+    <source>
+      @type tail
+      @id in_tail_container_logs
+      @label @containers
+      path /var/log/containers/*.log
+      pos_file /var/log/fluentd-containers.log.pos
+      tag kube.*
+      read_from_head true
+      <parse>
+        @type "cri"
+      </parse>
+    </source>
+
+    <label @containers>
+      # Enrich logs with Kubernetes metadata
+      <filter **>
+        @type kubernetes_metadata
+        @id filter_kube_metadata
+      </filter>
+
+      # Exclude Fluentd's own logs
+      <filter **>
+        @type grep
+        <exclude>
+          key $.kubernetes.labels.k8s-app
+          pattern ^fluentd-cloudwatch$
+        </exclude>
+      </filter>
+
+      # Include only logs from specific applications (using pod names)
+      <filter **>
+        @type grep
+        <include>
+          key $.kubernetes.pod_name
+          pattern ^(dev-backend-web|dev-backend-celery|dev-backend-celery-beat|dev-rabbitmq)*
+        </include>
+      </filter>
+
+      # (Optional) Include by namespace if all apps are in "dev" namespace
+      # Uncomment the following lines if needed
+      <filter **>
+        @type grep
+        <include>
+          key $.kubernetes.namespace_name
+          pattern ^dev$
+        </include>
+      </filter>
+
+      # Transform log records to add metadata
+      <filter **>
+        @type record_transformer
+        @id filter_add_namespace_pod_metadata
+        enable_ruby true
+        <record>
+          stream_name ${record["kubernetes"]["namespace_name"]}-${record["kubernetes"]["pod_name"]}
+        </record>
+      </filter>
+
+      # Match and send logs to CloudWatch
+      <match kube.**>
+        @type cloudwatch_logs
+        @id out_cloudwatch_logs_containers
+        region "#{ENV.fetch('AWS_REGION', 'ap-south-1')}"
+        log_group_name "Sidfarm-Dev-cluster"
+        log_stream_name_key stream_name
+        auto_create_stream true
+        <buffer>
+          flush_interval 5s
+          chunk_limit_size 2m
+          queued_chunks_limit_size 32
+          retry_forever true
+        </buffer>
+        <server>
+          host <otel-collector-service-name>  # Replace with your service name for the Otel Collector
+          port 8006
+        </server>
+      </match>
+    </label>
+
+
+  # containers.conf: |
+  #   <source>
+  #     @type tail
+  #     @id in_tail_container_logs
+  #     @label @containers
+  #     path /var/log/containers/*.log
+  #     pos_file /var/log/fluentd-containers.log.pos
+  #     tag kube.*
+  #     read_from_head true
+  #     <parse>
+  #       @type "cri"
+  #     </parse>
+  #   </source>
+ 
+  #   <label @containers>
+  #     <filter **>
+  #       @type kubernetes_metadata
+  #       @id filter_kube_metadata
+  #     </filter>
+ 
+  #     # Exclude Fluentd's own logs from processing
+  #     <filter **>
+  #       @type grep
+  #       <exclude>
+  #         key $.kubernetes.labels.k8s-app
+  #         pattern ^fluentd-cloudwatch$
+  #       </exclude>
+  #     </filter>
+ 
+  #     <filter **>
+  #       @type record_transformer
+  #       @id filter_add_namespace_pod_metadata
+  #       enable_ruby true
+  #       <record>
+  #         # Combine namespace and pod name for the stream name
+  #         stream_name ${record["kubernetes"]["namespace_name"]}-${record["kubernetes"]["pod_name"]}
+  #       </record>
+  #     </filter>
+ 
+  #     <match kube.**>
+  #       @type cloudwatch_logs
+  #       @id out_cloudwatch_logs_containers
+  #       region "#{ENV.fetch('AWS_REGION', 'ap-south-1')}"
+       
+  #       # Set log group name to "dev-env-Dacio-cluster" explicitly
+  #       log_group_name "Sidfarm-Dev-cluster"
+       
+  #       # Use the combined namespace-pod name for log stream naming
+  #       log_stream_name_key stream_name
+       
+  #       auto_create_stream true
+       
+  #       <buffer>
+  #         flush_interval 5s
+  #         chunk_limit_size 2m
+  #         queued_chunks_limit_size 32
+  #         retry_forever true
+  #       </buffer>
+  #     </match>
+  #   </label>
