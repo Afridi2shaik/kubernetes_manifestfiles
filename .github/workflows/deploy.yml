@@ -3,7 +3,7 @@ name: Deploy to EKS with Blue-Green Deployment
 on:
   push:
     branches:
-      - main
+      - master
 
 jobs:
   deploy:
