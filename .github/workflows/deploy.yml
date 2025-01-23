@@ -1,0 +1,58 @@
+name: Deploy to EKS with Blue-Green Deployment
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE }}
+        aws-region: ${{ secrets.AWS_REGION }}
+
+    - name: Install kubectl
+      run: |
+        curl -LO "https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl"
+        chmod +x ./kubectl
+        sudo mv ./kubectl /usr/local/bin/kubectl
+
+    - name: Update kubeconfig
+      run: aws eks update-kubeconfig --name ${{ secrets.CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}
+
+    - name: Determine Current Deployment
+      id: current-deployment
+      run: |
+        ACTIVE_COLOR=$(kubectl get svc backend-service -o jsonpath='{.spec.selector.version}' || echo "blue")
+        NEXT_COLOR=$([[ "$ACTIVE_COLOR" == "blue" ]] && echo "green" || echo "blue")
+        echo "active_color=$ACTIVE_COLOR" >> $GITHUB_ENV
+        echo "next_color=$NEXT_COLOR" >> $GITHUB_ENV
+
+    - name: Deploy New Version
+      run: |
+        kubectl apply -f manifests/${{ env.next_color }}-deployment.yaml
+
+    - name: Validate New Deployment
+      run: |
+        kubectl rollout status deployment/${{ env.next_color }}-backend
+
+    - name: Switch Traffic
+      run: |
+        kubectl patch svc backend-service \
+          -p '{"spec":{"selector":{"app":"backend","version":"'${{ env.next_color }}'"}}}'
+
+    - name: Cleanup Old Deployment
+      run: |
+        kubectl delete deployment/${{ env.active_color }}-backend || true
